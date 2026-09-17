@@ -480,13 +480,23 @@ efibootmg() {
             # 1. Grab your original default permanent boot order before making changes
             local current_order; current_order=$(efibootmgr | grep "^BootOrder:" | cut -d' ' -f2)
 
-            # 2. Extract your primary Bazzite OS boot slot index token (e.g. 0000)
-            local bazzite_slot; bazzite_slot=$(efibootmgr | grep -E "Bazzite|Fedora" | head -n 1 | cut -d' ' -f1 | tr -d 'Boot*' | tr -d ':')
+            # 2. Extract your primary OS boot slot index token (e.g. 0000).
+            #    FORK NOTE: upstream only matched Bazzite/Fedora, so on CachyOS
+            #    (and other distros) this always missed and silently fell back
+            #    to the hardcoded 0003 guess below - which may not be the real
+            #    boot entry on every board. Added CachyOS/Arch/CachyOS-KDE here;
+            #    extend this pattern if your distro's boot entry label differs
+            #    (check with 'efibootmgr' first).
+            local bazzite_slot; bazzite_slot=$(efibootmgr | grep -E "Bazzite|Fedora|CachyOS|Arch" | head -n 1 | cut -d' ' -f1 | tr -d 'Boot*' | tr -d ':')
 
-            # 3. Fallback: If no Bazzite index string is parsed, default to your active slot 0003
-            [[ -z "$bazzite_slot" ]] && bazzite_slot="0003"
+            # 3. Fallback: If no OS index string is parsed, default to your active slot 0003
+            if [[ -z "$bazzite_slot" ]]; then
+                bazzite_slot="0003"
+                echo -e "${YELLOW}[!] Could not match a known OS boot entry by label - falling back to slot ${bazzite_slot}.${NC}"
+                echo -e "${YELLOW}    Run 'efibootmgr' yourself to confirm this is really your OS, not a guess.${NC}"
+            fi
 
-            echo -e "${CYAN}[+] Locking Bazzite (${bazzite_slot}) as permanent system target...${NC}"
+            echo -e "${CYAN}[+] Locking boot slot (${bazzite_slot}) as permanent system target...${NC}"
 
             # 4. Re-enforce your permanent order table to keep your OS at index 0
             if [[ -n "$current_order" ]]; then
@@ -513,6 +523,45 @@ efibootmg() {
         echo "[-] Invalid entry or selection skipped. Aborting."
         sleep 1.5
     fi
+}
+
+# FORK ADDITION: restart just the Gamescope session (compositor + Steam),
+# without a full system reboot. Fixes the known "Steam home page renders
+# black but the menu/notifications still work" desync between Steam's CEF
+# home-page view and gamescope's Xwayland compositor - a silent hang, not a
+# crash, so there's nothing to catch in the logs after the fact. This is the
+# same recovery already confirmed to work cleanly (~10s, no reboot, Steam
+# re-logs on its own): `systemctl --user restart gamescope-session.target`.
+reset_gamescope() {
+    echo ""
+    echo -e "${YELLOW}==========================================${NC}"
+    echo -e "${YELLOW}       RESET GAMESCOPE SESSION            ${NC}"
+    echo -e "${YELLOW}==========================================${NC}"
+    echo -e "${DIM}Restarts the Gamescope compositor and Steam. Does not reboot the${NC}"
+    echo -e "${DIM}system or touch firmware. Use this if the Steam home page has gone${NC}"
+    echo -e "${DIM}black but the overlay/notifications still respond.${NC}"
+    echo ""
+
+    if ! systemctl --user list-units --all gamescope-session.target &>/dev/null; then
+        echo -e "${BIRed}[-] gamescope-session.target not found on this system. Aborting.${NC}"
+        type_prompt "Press Enter to return to main menu..." 0.03
+        read -r
+        return 1
+    fi
+
+    type_prompt "Restart Gamescope session now? Your screen will go black briefly. (y/N): " 0.03
+    read -r confirm_reset
+
+    if [[ "$confirm_reset" =~ ^[Yy]$ ]]; then
+        echo -e "${BIGreen}[+] Restarting gamescope-session.target...${NC}"
+        systemctl --user restart gamescope-session.target
+        echo -e "${BIGreen}[+] Done. Steam should reappear within ~10-15 seconds.${NC}"
+    else
+        echo "[-] Reset cancelled."
+    fi
+
+    type_prompt "Press Enter to return to main menu..." 0.03
+    read -r
 }
 
 # Function to handle creating shortcuts
@@ -704,20 +753,22 @@ while true; do
 
         if [[ "$IS_INSTALLED" == false ]]; then
         echo -e "\033[38;2;0;255;0m   5)\033[0m Manage Shortcuts (Create / Remove)"
+        echo -e "\033[38;2;0;255;0m   6)\033[0m Reset Gamescope Session (fix black home page)"
         echo -e "\033[38;2;0;255;0m   r)\033[0m Reload Menu Interface"
-        echo -e "\033[38;2;0;255;0m   6)\033[0m Cancel / Exit"
+        echo -e "\033[38;2;0;255;0m   7)\033[0m Cancel / Exit"
         echo -e "  ────────────────────────────────────────────────────────────"
-        type_prompt "  Select an option [1-6, r]: " 0.03
+        type_prompt "  Select an option [1-7, r]: " 0.03
         # FIX: Added -n 1 -s parameters to enable instant single-keystroke execution
         choice=""
         read -n 1 -s choice || true
         echo "" # Keeps your terminal margin layout aligned cleanly
     else
         echo -e "\033[38;2;0;255;0m   5)\033[0m Remove Shortcuts"
+        echo -e "\033[38;2;0;255;0m   6)\033[0m Reset Gamescope Session (fix black home page)"
         echo -e "\033[38;2;0;255;0m   r)\033[0m Reload Menu Interface"
-        echo -e "\033[38;2;0;255;0m   6)\033[0m Cancel / Exit"
+        echo -e "\033[38;2;0;255;0m   7)\033[0m Cancel / Exit"
         echo -e "  ────────────────────────────────────────────────────────────"
-        type_prompt "  Select an option [1-6, r]: " 0.03
+        type_prompt "  Select an option [1-7, r]: " 0.03
         # FIX: Added -n 1 -s parameters here as well
         choice=""
         read -n 1 -s choice || true
@@ -771,6 +822,9 @@ while true; do
                 remove_shortcuts
             fi
             ;;
+        6)
+            reset_gamescope
+            ;;
         # ======================================================================
         # 📥 PASTE THIS RE-EXECUTION BLOCK RIGHT HERE:
         # ==============================================================================
@@ -780,7 +834,7 @@ while true; do
             exec bash "$CURRENT_SCRIPT_PATH" "$@"
             ;;
 
-        6)
+        7)
             echo "Exiting..."
             close_terminal
             ;;
