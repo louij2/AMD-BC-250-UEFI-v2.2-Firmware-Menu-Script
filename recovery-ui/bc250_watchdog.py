@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""BC-250 watchdog: a failsafe for when Steam's Game Mode UI hangs.
+"""BC-250 watchdog: a failsafe for when Steam's Game Mode goes black.
 
-When Steam's main window hangs, the Library is part of that same window, so
-the BC-250 Recovery shortcut may be unreachable. This runs independently of
-Steam's UI and resets the Game Mode session in two ways:
+When Game Mode's screen goes black, the BC-250 Recovery shortcut may be
+unreachable. This runs independently of Steam's UI and handles two faults:
 
-  * Controller chord: hold View + Menu + LB + RB for 2 seconds.
-  * Hang detection: if Steam's main window stops answering DevTools for three
-    checks in a row, a minute apart.
+  * Stuck sleep (non-destructive). Steam's idle timer asks the system to
+    suspend, blanks the screen and waits for a resume. Suspend is masked on
+    this box, so the resume never comes: black screen, audio and games keep
+    running. If Steam reports "suspending" for a minute while the machine
+    never actually slept, this tells Steam it has resumed. Nothing closes.
+  * Hung UI (destructive). If Steam's main window stops answering DevTools
+    for three minutes, the Game Mode session is restarted.
 
-A black screen alone is not treated as a hang: Steam turns the display off
-when idle.
+Controller chord: hold View + Menu + LB + RB for 2 seconds. It wakes a stuck
+sleep if that is the problem, otherwise it restarts the Game Mode session.
+
+A black screen alone is not treated as a fault: Steam dims the display when
+idle and any input brings it back.
 
 Guard rails, because SteamOS moves ~/.steam aside after three Steam runs
 that each last under 60s (steam-short-session-tracker):
-  * the chord does nothing within 75s of Steam starting;
-  * automatic resets need Steam up for 5 minutes and are at most one per
+  * the chord does not restart anything within 75s of Steam starting;
+  * automatic restarts need Steam up for 5 minutes and are at most one per
     15 minutes.
 
 Usage:
@@ -45,9 +51,10 @@ STATE = Path.home() / ".local/state/bc250-watchdog.json"
 CHORD_HOLD = 2.0
 CHORD_MIN_STEAM_AGE = 75
 CHORD_COOLDOWN = 60
-PROBE_INTERVAL = 60
+PROBE_INTERVAL = 30
 PROBE_TIMEOUT = 10
-PROBE_FAILURES = 3
+PROBE_FAILURES = 6
+SUSPEND_STUCK_CHECKS = 2
 AUTO_MIN_STEAM_AGE = 300
 AUTO_COOLDOWN = 15 * 60
 MAIN_WINDOW = "Steam Big Picture Mode"
@@ -104,6 +111,36 @@ state = State()
 reset_lock = threading.Lock()
 
 
+def slept_seconds():
+    """Total time the machine has spent suspended since boot."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME) - time.clock_gettime(time.CLOCK_MONOTONIC)
+
+
+def steam_suspending():
+    """True/False from Steam's own sleep state; None if Steam can't be asked."""
+    try:
+        return bool(steam_cdp.evaluate("SuspendResumeStore.m_bSuspending === true",
+                                       timeout=PROBE_TIMEOUT))
+    except Exception:
+        return None
+
+
+def wake_steam(kind, reason):
+    if DRY_RUN:
+        log(f"{kind}: DRY RUN, would wake Steam from a stuck sleep ({reason})")
+        return True
+    try:
+        steam_cdp.evaluate("SuspendResumeStore.InitiateResume()", timeout=PROBE_TIMEOUT)
+    except Exception as exc:
+        log(f"{kind}: waking Steam failed: {exc}")
+        return False
+    time.sleep(2)
+    ok = steam_suspending() is False
+    log(f"{kind}: woke Steam from a stuck sleep ({reason}) -> {'ok' if ok else 'still suspending'}")
+    state.record(f"{kind}-wake", reason)
+    return ok
+
+
 def reset_session(kind, reason, min_age, cooldown):
     with reset_lock:
         if not unit_active("gamescope-session.target"):
@@ -147,6 +184,17 @@ def rumble(dev):
         dev.erase_effect(eid)
     except Exception:
         pass
+
+
+def chord_action(dev, name):
+    # Gentle fix first: a stuck sleep only needs a wake-up, and closes nothing.
+    if steam_suspending():
+        if wake_steam("chord", f"controller chord on {name}"):
+            rumble(dev)
+            return
+    if reset_session("chord", f"controller chord on {name}",
+                     CHORD_MIN_STEAM_AGE, CHORD_COOLDOWN):
+        rumble(dev)
 
 
 def chord_loop():
@@ -200,9 +248,9 @@ def chord_loop():
                 since.setdefault(path, now)
                 if now - since[path] >= CHORD_HOLD and path not in fired:
                     fired.add(path)
-                    if reset_session("chord", f"controller chord on {devices[path].name}",
-                                     CHORD_MIN_STEAM_AGE, CHORD_COOLDOWN):
-                        rumble(devices[path])
+                    name = devices[path].name
+                    threading.Thread(target=chord_action, args=(devices[path], name),
+                                     daemon=True).start()
             else:
                 since.pop(path, None)
                 fired.discard(path)
@@ -225,11 +273,29 @@ def main_window_answers():
 
 def probe_loop():
     failures = 0
+    stuck = 0
+    last_slept = slept_seconds()
     while True:
         time.sleep(PROBE_INTERVAL)
         if not unit_active("gamescope-session.target"):
-            failures = 0
+            failures = stuck = 0
             continue
+
+        # Stuck sleep: Steam says "suspending", but the machine didn't sleep
+        # (boot-time clock didn't jump past the monotonic clock).
+        slept = slept_seconds()
+        really_slept = slept - last_slept > 5
+        last_slept = slept
+        suspending = steam_suspending()
+        if suspending and not really_slept:
+            stuck += 1
+            log(f"probe: Steam stuck suspending ({stuck}/{SUSPEND_STUCK_CHECKS})")
+            if stuck >= SUSPEND_STUCK_CHECKS:
+                wake_steam("auto", "Steam stuck suspending but the system never slept")
+                stuck = 0
+            continue
+        stuck = 0
+
         age = unit_age("steam-launcher.service")
         if age is None or age < AUTO_MIN_STEAM_AGE:
             failures = 0
