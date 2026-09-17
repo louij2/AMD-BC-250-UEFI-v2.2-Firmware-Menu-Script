@@ -1,0 +1,48 @@
+#!/bin/bash
+# Forced command for the Steam Link's recovery key.
+#
+# The TV app has no business running arbitrary commands on the BC-250, so its
+# key is pinned to this wrapper in authorized_keys:
+#
+#   restrict,command="~/Reboot-to-UEFI/bc250-recovery-remote" ssh-ed25519 AAAA... steamlink-fix
+#
+# With a forced command, whatever the client asked for arrives in
+# SSH_ORIGINAL_COMMAND and is ignored by ssh itself. We accept exactly three
+# words and refuse everything else, so a stolen key can reset Game Mode and
+# nothing more.
+#
+# Exit status is the watchdog's: 0 if the action was carried out, 1 if it was
+# refused or failed. The TV app shows the last line we print.
+
+set -u
+
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+WATCHDOG="$SELF_DIR/bc250_watchdog.py"
+
+# systemctl --user needs the session bus, and an SSH command does not get
+# XDG_RUNTIME_DIR set. Without it the reset silently does nothing, which is
+# the worst possible failure for a recovery tool.
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+
+action=${SSH_ORIGINAL_COMMAND:-}
+
+case "$action" in
+fix|wake|reset)
+	;;
+"")
+	echo "no action given (expected: fix, wake or reset)" >&2
+	exit 1
+	;;
+*)
+	# Do not echo the request back: it is attacker-controlled text.
+	echo "refused: not a recovery action" >&2
+	exit 1
+	;;
+esac
+
+if [ ! -x "$WATCHDOG" ]; then
+	echo "watchdog not found at $WATCHDOG" >&2
+	exit 1
+fi
+
+exec "$WATCHDOG" "--$action"

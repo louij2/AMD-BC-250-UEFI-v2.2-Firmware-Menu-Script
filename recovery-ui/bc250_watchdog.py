@@ -28,6 +28,15 @@ Usage:
   bc250_watchdog.py             run (as a systemd user service)
   bc250_watchdog.py --dry-run   log what would happen, reset nothing
   bc250_watchdog.py --status    print the last events and exit
+  bc250_watchdog.py --fix       wake a stuck sleep, else reset Game Mode
+  bc250_watchdog.py --wake      only wake Steam from a stuck sleep
+  bc250_watchdog.py --reset     only reset the Game Mode session
+
+The last three are the same actions the controller chord performs, under the
+same guard rails, so they can be triggered from somewhere other than a
+controller -- the Steam Link TV app calls them over SSH. They exit 0 when the
+action was carried out and 1 when it was refused or failed, so a caller can
+report the outcome rather than guessing.
 """
 import json
 import subprocess
@@ -317,7 +326,33 @@ def probe_loop():
                 failures = 0
 
 
+def remote_action(what):
+    """One-shot action for a caller that isn't holding a controller.
+
+    Mirrors chord_action(), minus the rumble: the gentle fix is tried first
+    unless a specific action was asked for. Returns True if something was
+    actually done.
+    """
+    kind = "remote"
+    reason = f"{what} requested remotely"
+    if what in ("fix", "wake"):
+        suspending = steam_suspending()
+        if suspending is None:
+            log(f"{kind}: Steam is not answering DevTools")
+            if what == "wake":
+                return False
+        elif suspending:
+            return wake_steam(kind, reason)
+        elif what == "wake":
+            log(f"{kind}: Steam is not in a stuck sleep, nothing to wake")
+            return False
+    return reset_session(kind, reason, CHORD_MIN_STEAM_AGE, CHORD_COOLDOWN)
+
+
 def main():
+    for flag in ("--fix", "--wake", "--reset"):
+        if flag in sys.argv:
+            sys.exit(0 if remote_action(flag[2:]) else 1)
     if "--status" in sys.argv:
         for e in state.data["events"][-10:]:
             print(f"{e['time']}  {e['kind']:5}  {e['detail']}")

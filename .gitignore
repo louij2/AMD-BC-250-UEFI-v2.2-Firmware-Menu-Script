@@ -1,2 +1,12 @@
 __pycache__/
 *.pyc
+
+# Steam Link apps: per-device secrets and build output, never in a public repo
+steamlink-apps/*/settings.conf
+steamlink-apps/*/id_steamlink
+steamlink-apps/*/id_steamlink.pub
+steamlink-apps/*/.icons/
+steamlink-apps/*/steamlink/
+steamlink-apps/*/*.o
+steamlink-apps/bc250-fix/bc250-fix
+steamlink-apps/bc250-status/bc250-status
