@@ -138,7 +138,11 @@ def gather_status():
 
     state, detail = steam_ui_state()
     steam = _run(["systemctl", "--user", "is-active", "steam-launcher.service"])
-    s["steam"] = (state, detail, f"steam-launcher: {steam or 'unknown'}")
+    watchdog = _run(["systemctl", "--user", "is-active", "bc250-watchdog.service"])
+    s["watchdog"] = watchdog == "active"
+    s["steam"] = (state, detail,
+                  f"steam-launcher: {steam or 'unknown'} · watchdog: "
+                  f"{'on' if s['watchdog'] else 'off'}")
 
     ts = _run(["tailscale", "ip", "-4"], timeout=2).splitlines()
     s["net"] = ("ok" if ts else "warn", ts[0] if ts else "Tailscale offline", "Tailscale")
@@ -400,10 +404,10 @@ class Window(QWidget):
         titles = QVBoxLayout()
         title = QLabel("BC-250 Recovery")
         title.setObjectName("title")
-        sub = QLabel("Fix a stuck Game Mode, reboot to firmware, or open advanced tools")
-        sub.setObjectName("subtitle")
+        self.subtitle = QLabel("Fix a stuck Game Mode, reboot to firmware, or open advanced tools")
+        self.subtitle.setObjectName("subtitle")
         titles.addWidget(title)
-        titles.addWidget(sub)
+        titles.addWidget(self.subtitle)
         head.addSpacing(18)
         head.addLayout(titles)
         head.addStretch()
@@ -495,6 +499,9 @@ class Window(QWidget):
         for key, card in self.cards.items():
             if key in status:
                 card.set(*status[key])
+        if status.get("watchdog"):
+            self.subtitle.setText("Screen gone black and can't get here? Hold View + Menu + LB + RB "
+                                  "for 2 seconds to reset Game Mode.")
 
     def update_clock(self):
         self.clock.setText(time.strftime("%H:%M"))

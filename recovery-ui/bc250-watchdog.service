@@ -1,0 +1,11 @@
+[Unit]
+Description=BC-250 Game Mode watchdog (controller reset chord and hang detection)
+Documentation=https://github.com/louij2/AMD-BC-250-UEFI-v2.2-Firmware-Menu-Script
+
+[Service]
+ExecStart=/usr/bin/python3 %h/Reboot-to-UEFI/bc250_watchdog.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
