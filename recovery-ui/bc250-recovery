@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Stable entry point for the "BC-250 Recovery" Steam shortcut.
+# Steam derives the shortcut's id (and so its artwork filenames) from this
+# path plus the shortcut name, so keep this file where it is and change what
+# it launches instead.
+DIR="$(dirname "$(readlink -f "$0")")"
+
+if [[ "$1" == "--cli" ]]; then
+    exec konsole -e sudo bash "$DIR/reboot-uefi.sh"
+fi
+
+# gamescope exposes an X server; Qt's wayland backend doesn't get on with it.
+export QT_QPA_PLATFORM=xcb
+
+if python3 -c 'import PyQt6.QtWidgets' 2>/dev/null; then
+    python3 "$DIR/bc250_recovery_ui.py" "$@"
+    rc=$?
+    # 1 = the GUI itself crashed. Anything else (0, or 143 when a session reset
+    # tears us down) must not spawn a terminal.
+    [[ $rc -ne 1 ]] && exit "$rc"
+    echo "GUI crashed; falling back to the terminal menu" >&2
+fi
+exec konsole -e sudo bash "$DIR/reboot-uefi.sh"

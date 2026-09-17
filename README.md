@@ -2,6 +2,19 @@
 
 An advanced configuration and firmware menu script featuring 8 unlocked cores, ACPI fixes, individual on/off toggles, and multiple custom boot logos for the AMD BC-250.
 
+> [!NOTE]
+> **This is a fork** of [Forbidden-Darkness/AMD-BC-250-UEFI-v2.2-Firmware-Menu-Script](https://github.com/Forbidden-Darkness/AMD-BC-250-UEFI-v2.2-Firmware-Menu-Script). Firmware images and the UEFI menu are unchanged. Additions:
+>
+> - **BC-250 Recovery** (`recovery-ui/`): a controller-driven recovery screen you launch from Steam Game Mode as a non-Steam game, with library artwork. It resets a stuck Game Mode session (the "home page is black but the menu still works" hang), restarts Steam, reboots to BIOS, and shows core-unlock, firmware, network and storage status. No root needed; the terminal menu below is one tile away for firmware work.
+> - `reboot-uefi.sh`: a "Reset Gamescope Session" option; the one-time USB boot now recognises CachyOS/Arch boot entries (it only matched Bazzite/Fedora and otherwise silently guessed slot 0003); "Remove Shortcuts" no longer deletes the folder the recovery app lives in; the create-shortcuts submenu's Cancel option now actually cancels.
+>
+> Install the recovery app on the BC-250 as your normal user (Steam can be running):
+> ```bash
+> git clone https://github.com/louij2/AMD-BC-250-UEFI-v2.2-Firmware-Menu-Script.git
+> bash AMD-BC-250-UEFI-v2.2-Firmware-Menu-Script/recovery-ui/install.sh
+> ```
+> Needs `python-pyqt6` and `python-evdev`; without them the shortcut opens the terminal menu instead. It talks to Steam through Steam's DevTools port on `127.0.0.1:8080`, which only accepts local connections — keep it that way, it has no authentication.
+
 ---
 
 > [!IMPORTANT]

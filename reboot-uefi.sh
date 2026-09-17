@@ -578,7 +578,9 @@ create_shortcuts() {
     type_prompt "Enter choice [1-4]: " 0.03
     read -r shortcut_choice
 
-    case $choice in
+    # FORK: upstream switched on $choice (the previous menu's answer), so
+    # "4) Cancel" still installed everything.
+    case $shortcut_choice in
 
         1|2|3)
             # Create installation directory infrastructure
@@ -716,7 +718,11 @@ remove_shortcuts() {
 
             # Check if BOTH shortcuts are now gone
             if [[ ! -f "$DESKTOP_FILE" && ! -f "$APP_MENU_FILE" ]]; then
-                if [[ -d "$INSTALL_DIR" ]]; then
+                # FORK: the Game Mode recovery app lives in this folder too,
+                # and the Steam shortcut points at it - don't delete it.
+                if [[ -e "$INSTALL_DIR/bc250-recovery" ]]; then
+                    echo -e "${YELLOW}[!] Keeping ${INSTALL_DIR}: the BC-250 Recovery Steam shortcut uses it.${NC}"
+                elif [[ -d "$INSTALL_DIR" ]]; then
                     rm -rf "$INSTALL_DIR"
                     echo -e "${BIGreen}[+] Installation directory cleaned up from home folder: ${INSTALL_DIR}${NC}"
                 fi
