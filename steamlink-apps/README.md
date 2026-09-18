@@ -198,6 +198,23 @@ could not reach the console. "Not needed" is a distinct outcome from "failed",
 and worth seeing — asking to wake a console that is not actually asleep should
 not look like a broken app.
 
+## The ROM share
+
+RetroArch reads the library from Unraid's existing **Games** share, which was
+already NFS-exported read-only to every host -- so this needed no new share
+and no new service. Mount it on the device with:
+
+```bash
+mount -t nfs -o vers=3,ro,nolock 10.0.0.24:/mnt/user/Games /mnt/games
+```
+
+`vers=3` is not optional, for the CIFS/SMB2 reason above.
+
+BIOS images are in that share, so `system_directory` points at them rather
+than copying 117MB into the device's ~1GB of flash. Saves stay in local flash
+because the export is read-only -- which is also the safer default: a
+misbehaving core cannot write into a 6.4TB library.
+
 ## bc250-status
 
 Read-only. Four rows:
